@@ -28,13 +28,23 @@ import {
     type MouseEvent,
 } from "react";
 
-import type { InteractiveRun } from "@/lib/code-execution/interactive-client";
+import type {
+    InteractiveRun,
+    RunStatus,
+} from "@/lib/code-execution/interactive-client";
 
 export interface TerminalProps {
     run: InteractiveRun | null;
 
     /** Live chunks received from the SSE stream. */
     output: TerminalSegment[];
+
+    /**
+     * Execution lifecycle state. Drives the header status pill and the
+     * "Program is waiting for input..." hint. Optional — when omitted
+     * the terminal falls back to run/no-run indicators.
+     */
+    status?: RunStatus;
 
     onClear: () => void;
 
@@ -59,6 +69,7 @@ export interface TerminalSegment {
 export default function Terminal({
     run,
     output,
+    status,
     onClear,
     onInput,
     onIdleInput,
@@ -270,6 +281,14 @@ export default function Terminal({
 
     const isRunning = Boolean(run);
 
+    /**
+     * Waiting-for-input is surfaced from the parent's generic
+     * detection (process alive + output-quiet window). While a run is
+     * active the input row is always available — the message below it
+     * is only a hint, never a gate.
+     */
+    const waitingForInput = run && status === "waiting_for_input";
+
     return (
         <div
             ref={terminalRef}
@@ -296,12 +315,18 @@ export default function Terminal({
                         Terminal
                     </h2>
 
-                    {run && (
-                        <span className="flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-0.5 text-[11px] font-medium text-emerald-300">
-                            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
-                            Running
-                        </span>
-                    )}
+                    {run &&
+                        (status === "waiting_for_input" ? (
+                            <span className="flex items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-0.5 text-[11px] font-medium text-amber-300">
+                                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400" />
+                                Waiting for input
+                            </span>
+                        ) : (
+                            <span className="flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-0.5 text-[11px] font-medium text-emerald-300">
+                                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
+                                Running
+                            </span>
+                        ))}
                 </div>
 
                 <div className="flex items-center gap-2">
@@ -446,6 +471,15 @@ export default function Terminal({
                 onClick={(e) => e.stopPropagation()}
                 className="shrink-0 border-t border-neutral-800 bg-neutral-950"
             >
+                {waitingForInput && (
+                    <div className="flex items-center gap-2 border-b border-amber-500/10 bg-amber-500/[0.04] px-4 py-1.5">
+                        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400" />
+                        <p className="text-xs font-medium text-amber-300">
+                            Program is waiting for input...
+                        </p>
+                    </div>
+                )}
+
                 <div className="flex items-center gap-2 px-4 py-2">
                     <span className="select-none font-mono text-emerald-400">
                         ›
@@ -467,7 +501,9 @@ export default function Terminal({
                             isRunning
                                 ? sending
                                     ? "Sending input..."
-                                    : "Type input here and press Enter..."
+                                    : waitingForInput
+                                        ? "Enter the input the program is asking for..."
+                                        : "Type input here and press Enter..."
                                 : canTypeWhenIdle
                                     ? "Type program input for the next Run Code (Enter to add)..."
                                     : "Run Code to start the program."
@@ -485,6 +521,23 @@ export default function Terminal({
                             "disabled:text-neutral-500",
                         ].join(" ")}
                     />
+
+                    {(isRunning || canTypeWhenIdle) && !sending && (
+                        <button
+                            type="submit"
+                            onClick={(e) => e.stopPropagation()}
+                            title="Send this line to the running program's stdin"
+                            className={[
+                                "shrink-0 rounded-md border border-emerald-500/30",
+                                "bg-emerald-500/10 px-3 py-1",
+                                "text-xs font-medium text-emerald-300",
+                                "transition-colors hover:bg-emerald-500/20",
+                                "disabled:cursor-not-allowed disabled:opacity-40",
+                            ].join(" ")}
+                        >
+                            Send Input
+                        </button>
+                    )}
 
                     {(isRunning || canTypeWhenIdle) && !sending && (
                         <span className="select-none text-[10px] text-neutral-600">

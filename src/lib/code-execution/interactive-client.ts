@@ -11,6 +11,21 @@
 import type { LanguageId } from "@/lib/code-execution/types";
 
 /**
+ * Execution lifecycle states surfaced in the terminal UI.
+ *
+ * "waiting_for_input" is detected automatically (generic output-quiet
+ * heuristic while the process is alive) — the user never has to
+ * configure whether their program reads stdin.
+ */
+export type RunStatus =
+    | "idle"
+    | "running"
+    | "waiting_for_input"
+    | "completed"
+    | "error"
+    | "timeout";
+
+/**
  * While the SSE stream is open, the client pings the server at this
  * interval to prove a live user is attached to the terminal. The
  * server resets the session's idle-reap timer on every ping, so a

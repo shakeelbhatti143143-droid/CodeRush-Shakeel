@@ -39,7 +39,11 @@ import BookmarkButton from "@/components/bookmarks/BookmarkButton";
 import { ToastStack, type ToastItem, useToasts } from "@/components/ui/Toast";
 
 import { getLanguage } from "@/lib/code-execution/languages";
-import type { InteractiveRun } from "@/lib/code-execution/interactive-client";
+import {
+    startInteractiveRun,
+    type InteractiveRun,
+    type RunStatus,
+} from "@/lib/code-execution/interactive-client";
 
 import type { LanguageId } from "@/lib/code-execution/types";
 import {
@@ -114,6 +118,15 @@ export default function CodePage() {
 
     const [run, setRun] =
         useState<InteractiveRun | null>(null);
+
+    /**
+     * Execution lifecycle shown in the terminal:
+     * idle → running ⇄ waiting_for_input → completed | error | timeout.
+     * "waiting_for_input" is detected automatically — the user never
+     * configures whether their program reads stdin.
+     */
+    const [runStatus, setRunStatus] =
+        useState<RunStatus>("idle");
 
     const [output, setOutput] =
         useState<TerminalSegment[]>([]);
@@ -460,6 +473,32 @@ export default function CodePage() {
      */
 
     /* ------------------------------------------------------------
+       Interactive Execution (live stdin/stdout sessions)
+    ------------------------------------------------------------ */
+
+    /**
+     * While a program is alive, this quiet window with NO stdout/stderr
+     * activity is the generic heuristic for "the program is blocked
+     * reading stdin". It is only a HINT: the input row is available
+     * during the whole run, so programs that interleave input with
+     * output still work. Must stay well below the server's 3-minute
+     * idle reap so no session is ever killed by a false positive.
+     */
+    const INTERACTIVE_WAIT_DETECT_MS = 1_200;
+
+    const INTERACTIVE_WAIT_POLL_MS = 250;
+
+    const interactiveWaitTimerRef = useRef<number | null>(null);
+
+    const clearInteractiveWaitTimer = useCallback(() => {
+        if (interactiveWaitTimerRef.current !== null) {
+            window.clearInterval(interactiveWaitTimerRef.current);
+
+            interactiveWaitTimerRef.current = null;
+        }
+    }, []);
+
+    /* ------------------------------------------------------------
        Stop
     ------------------------------------------------------------ */
 
@@ -469,6 +508,10 @@ export default function CodePage() {
         runRef.current = null;
 
         setRun(null);
+
+        setRunStatus("idle");
+
+        clearInteractiveWaitTimer();
 
         if (current) {
             void current.stop();
@@ -480,11 +523,429 @@ export default function CodePage() {
         if (executingRef.current) {
             abortRef.current?.abort();
         }
-    }, []);
+    }, [clearInteractiveWaitTimer]);
 
-    /* ------------------------------------------------------------
-       Language Change
-    ------------------------------------------------------------ */
+    /**
+     * Run the program through the interactive session backend
+     * (POST /api/code/interactive/start + SSE stream + stdin writes).
+     *
+     * Works generically for ANY program: no input, one input, many
+     * inputs, loops that read repeatedly — the session keeps the
+     * process alive with its stdin open and the input row available
+     * for as long as the program runs.
+     *
+     * Returns true when the run was handled interactively. Returns
+     * false when the interactive backend is unavailable (no Docker /
+     * local runtime, rate limit, spawn failure) so the caller can fall
+     * back to the single-shot execution flow without breaking anything.
+     */
+    const tryInteractiveRun = useCallback(
+        async (
+            sessionLanguage: LanguageId,
+            sessionCode: string,
+            startedAtMs: number,
+        ): Promise<boolean> => {
+            let session: InteractiveRun;
+
+            try {
+                session = await startInteractiveRun(
+                    sessionLanguage,
+                    sessionCode,
+                );
+            } catch (startError) {
+                console.warn(
+                    "[CodeRush] Interactive backend unavailable, falling back to single-shot execution:",
+                    startError,
+                );
+
+                return false;
+            }
+
+            // The Convex execution record is keyed by the live session
+            // id — the same id handleInputSent/saveExecutionLog use to
+            // attribute streamed stdin/stdout logs to this run.
+            const executionId = session.sessionId;
+
+            try {
+                await convex.mutation(
+                    api.executions.createExecution,
+                    {
+                        executionId,
+                        language: sessionLanguage,
+                    },
+                );
+            } catch (error) {
+                console.warn(
+                    "[CodeRush] Could not record the execution:",
+                    error,
+                );
+            }
+
+            runRef.current = session;
+
+            setRun(session);
+
+            setRunStatus("running");
+
+            let stdoutCollector = "";
+
+            let stderrCollector = "";
+
+            let lastActivityAt = Date.now();
+
+            let waitingAnnounced = false;
+
+            let settled = false;
+
+            const finishRun = (
+                convexStatus:
+                    | "success"
+                    | "runtime_error"
+                    | "compilation_error"
+                    | "timeout"
+                    | "stopped"
+                    | "internal_error",
+                metaLabel: string,
+                exitCode: number | null,
+                finalStatus: RunStatus,
+            ) => {
+                if (settled) return;
+
+                settled = true;
+
+                clearInteractiveWaitTimer();
+
+                appendOutput([
+                    {
+                        kind: "meta",
+                        text: `\n[${metaLabel}]\n`,
+                    },
+                ]);
+
+                setRunStatus(finalStatus);
+
+                void convex
+                    .mutation(
+                        api.executions.updateExecution,
+                        {
+                            executionId,
+                            status: convexStatus,
+                            completedAt: Date.now(),
+                            exitCode:
+                                exitCode ?? undefined,
+                            executionTime:
+                                Math.max(
+                                    0,
+                                    Date.now() -
+                                        startedAtMs,
+                                ),
+                        },
+                    )
+                    .catch(() => { });
+
+                runRef.current = null;
+
+                setRun(null);
+
+                if (convexStatus === "success") {
+                    setParsedError(null);
+
+                    push(
+                        "✓ Program completed successfully",
+                        "success",
+                    );
+                } else if (
+                    convexStatus === "runtime_error" ||
+                    convexStatus === "compilation_error"
+                ) {
+                    const parsed =
+                        parseError({
+                            language: sessionLanguage,
+                            stderr:
+                                stderrCollector || null,
+                            stdout: stdoutCollector,
+                            exitCode: exitCode ?? 1,
+                        }) ||
+                        makeInternalError(metaLabel);
+
+                    setParsedError(parsed);
+
+                    setActiveTab("error");
+
+                    push(
+                        `Error detected: ${parsed.title}`,
+                        "error",
+                    );
+                } else if (convexStatus === "timeout") {
+                    push(
+                        "Program reached the time limit",
+                        "error",
+                    );
+                }
+            };
+
+            // Flush stdin typed BEFORE Run Code straight into the live
+            // process (same contract as the single-shot flow, where it
+            // was submitted with the request).
+            const bufferedStdin = stdinBufferRef.current;
+
+            stdinBufferRef.current = "";
+
+            if (bufferedStdin.length > 0) {
+                const lines = bufferedStdin.split("\n");
+
+                if (lines[lines.length - 1] === "") {
+                    lines.pop();
+                }
+
+                for (const line of lines) {
+                    const ok = await session.sendLine(
+                        line,
+                    );
+
+                    if (!ok) break;
+
+                    appendOutput([
+                        {
+                            kind: "stdout",
+                            text: `${line}\n`,
+                        },
+                    ]);
+
+                    void saveExecutionLog(
+                        executionId,
+                        "stdin",
+                        line,
+                    );
+
+                    lastActivityAt = Date.now();
+                }
+            }
+
+            // Generic waiting-for-input detection: process alive +
+            // no streamed output for the quiet window. Purely a UI
+            // hint; the input row is available during the whole run.
+            clearInteractiveWaitTimer();
+
+            interactiveWaitTimerRef.current =
+                window.setInterval(() => {
+                    if (
+                        settled ||
+                        !session.running ||
+                        Date.now() - lastActivityAt <=
+                            INTERACTIVE_WAIT_DETECT_MS
+                    ) {
+                        return;
+                    }
+
+                    if (!waitingAnnounced) {
+                        waitingAnnounced = true;
+
+                        setRunStatus("waiting_for_input");
+
+                        appendOutput([
+                            {
+                                kind: "meta",
+                                text: "\n[Program is waiting for input...]\n",
+                            },
+                        ]);
+                    }
+                }, INTERACTIVE_WAIT_POLL_MS);
+
+            void (async () => {
+                try {
+                    await session.stream((event) => {
+                        switch (event.kind) {
+                            case "stdout": {
+                                lastActivityAt = Date.now();
+
+                                if (waitingAnnounced) {
+                                    waitingAnnounced = false;
+
+                                    setRunStatus("running");
+                                }
+
+                                stdoutCollector +=
+                                    event.text;
+
+                                appendOutput([
+                                    {
+                                        kind: "stdout",
+                                        text: event.text,
+                                    },
+                                ]);
+
+                                void saveExecutionLog(
+                                    executionId,
+                                    "stdout",
+                                    event.text,
+                                );
+
+                                break;
+                            }
+
+                            case "stderr": {
+                                lastActivityAt = Date.now();
+
+                                if (waitingAnnounced) {
+                                    waitingAnnounced = false;
+
+                                    setRunStatus("running");
+                                }
+
+                                stderrCollector +=
+                                    event.text;
+
+                                appendOutput([
+                                    {
+                                        kind: "stderr",
+                                        text: event.text,
+                                    },
+                                ]);
+
+                                void saveExecutionLog(
+                                    executionId,
+                                    "stderr",
+                                    event.text,
+                                );
+
+                                break;
+                            }
+
+                            case "exit": {
+                                const {
+                                    exitCode,
+                                    reason,
+                                } = event;
+
+                                if (reason === "timeout") {
+                                    finishRun(
+                                        "timeout",
+                                        "Program reached the time limit and was terminated.",
+                                        exitCode,
+                                        "timeout",
+                                    );
+                                } else if (
+                                    reason === "stopped"
+                                ) {
+                                    finishRun(
+                                        "stopped",
+                                        "Program stopped.",
+                                        exitCode,
+                                        "completed",
+                                    );
+                                } else if (
+                                    reason === "idle_timeout"
+                                ) {
+                                    finishRun(
+                                        "stopped",
+                                        "Session closed after inactivity.",
+                                        exitCode,
+                                        "error",
+                                    );
+                                } else if (exitCode === 0) {
+                                    finishRun(
+                                        "success",
+                                        "Program finished.",
+                                        exitCode,
+                                        "completed",
+                                    );
+                                } else if (
+                                    stdoutCollector
+                                        .length === 0 &&
+                                    stderrCollector
+                                        .length > 0
+                                ) {
+                                    // No program output at all —
+                                    // most likely the compile stage
+                                    // failed (g++/javac run inside
+                                    // the interactive command).
+                                    finishRun(
+                                        "compilation_error",
+                                        "Compilation failed.",
+                                        exitCode,
+                                        "error",
+                                    );
+                                } else {
+                                    finishRun(
+                                        "runtime_error",
+                                        "Program finished with an error.",
+                                        exitCode,
+                                        "error",
+                                    );
+                                }
+
+                                break;
+                            }
+
+                            case "error": {
+                                appendOutput([
+                                    {
+                                        kind: "stderr",
+                                        text: `\n[${event.message}]\n`,
+                                    },
+                                ]);
+
+                                finishRun(
+                                    "internal_error",
+                                    event.message,
+                                    null,
+                                    "error",
+                                );
+
+                                break;
+                            }
+
+                            case "closed": {
+                                // Stream ended without an exit
+                                // event (rare — reconnect drop).
+                                finishRun(
+                                    "stopped",
+                                    "Output stream closed.",
+                                    null,
+                                    "error",
+                                );
+
+                                break;
+                            }
+                        }
+                    });
+                } catch (streamError) {
+                    console.error(
+                        "[CodeRush] Interactive stream failed:",
+                        streamError,
+                    );
+
+                    appendOutput([
+                        {
+                            kind: "stderr",
+                            text: "\n[Lost connection to the running program.]\n",
+                        },
+                    ]);
+
+                    finishRun(
+                        "internal_error",
+                        "Lost connection to the running program.",
+                        null,
+                        "error",
+                    );
+                }
+            })();
+
+            return true;
+        },
+        [
+            convex,
+            appendOutput,
+            saveExecutionLog,
+            push,
+            clearInteractiveWaitTimer,
+        ],
+    );
+
+            /* ------------------------------------------------------------
+               Language Change
+            ------------------------------------------------------------ */
 
     const handleLanguageChange =
         useCallback(
@@ -731,6 +1192,24 @@ export default function CodePage() {
             let stdoutCollector = "";
 
             let stderrCollector = "";
+
+            /**
+             * Preferred path: live interactive session (real streaming
+             * stdin/stdout). Handles ANY program that waits for input
+             * at runtime — automatically, no configuration needed.
+             * Falls back to the single-shot flow below when the
+             * interactive backend is unavailable.
+             */
+            const interactiveHandled =
+                await tryInteractiveRun(
+                    sessionLanguage,
+                    sessionCode,
+                    startedAtMs,
+                );
+
+            if (interactiveHandled) {
+                return;
+            }
 
             executingRef.current = true;
 
@@ -1040,6 +1519,7 @@ export default function CodePage() {
             convex,
             appendOutput,
             push,
+            tryInteractiveRun,
         ],
     );
 
@@ -2027,6 +2507,9 @@ export default function CodePage() {
                                         run={run}
                                         output={
                                             output
+                                        }
+                                        status={
+                                            runStatus
                                         }
                                         onClear={() =>
                                             setOutput(

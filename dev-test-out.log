@@ -1,0 +1,289 @@
+
+> coderush@0.1.0 dev
+> next dev
+
+ ⚠ Warning: Next.js inferred your workspace root, but it may not be correct.
+ We detected multiple lockfiles and selected the directory of E:\coding platform\package-lock.json as the root directory.
+ To silence this warning, set `outputFileTracingRoot` in your Next.js config, or consider removing one of the lockfiles if it's not needed.
+   See https://nextjs.org/docs/app/api-reference/config/next-config-js/output#caveats for more information.
+ Detected additional lockfiles: 
+   * E:\coding platform\coderush\package-lock.json
+
+   ▲ Next.js 15.5.23
+   - Local:        http://localhost:3000
+   - Network:      http://192.168.1.7:3000
+   - Environments: .env.local
+
+ ✓ Starting...
+ ✓ Ready in 4s
+ ✓ Compiled /middleware in 269ms (202 modules)
+Returning false from isAuthenticated because Error: {"code":"Unauthenticated","message":"Could not verify OIDC token claim. Check that the token signature is valid and the token hasn't expired."}
+    at async eval (src\middleware.ts:17:18)
+  15 |
+  16 | export default convexAuthNextjsMiddleware(async (request) => {
+> 17 |   const authed = await isAuthenticatedNextjs();
+     |                  ^
+  18 |
+  19 |   if (isProtectedRoute(request) && !authed) {
+  20 |     return nextjsMiddlewareRedirect(request, "/login"); {
+  
+}
+ ○ Compiling / ...
+ ✓ Compiled / in 2.5s (1786 modules)
+Returning false from isAuthenticated because Error: {"code":"Unauthenticated","message":"Could not verify OIDC token claim. Check that the token signature is valid and the token hasn't expired."}
+    at async eval (src\middleware.ts:17:18)
+  15 |
+  16 | export default convexAuthNextjsMiddleware(async (request) => {
+> 17 |   const authed = await isAuthenticatedNextjs();
+     |                  ^
+  18 |
+  19 |   if (isProtectedRoute(request) && !authed) {
+  20 |     return nextjsMiddlewareRedirect(request, "/login"); {
+  
+}
+ GET / 200 in 207ms
+ ○ Compiling /dashboard ...
+ ✓ Compiled /dashboard in 972ms (1833 modules)
+ GET /dashboard 200 in 1183ms
+ GET /dashboard 200 in 48ms
+ ○ Compiling /admin/dashboard ...
+ ✓ Compiled /admin/dashboard in 1829ms (2886 modules)
+ GET /admin/dashboard 200 in 1984ms
+ ○ Compiling /code ...
+ ✓ Compiled /code in 1084ms (2989 modules)
+ GET /code 200 in 1250ms
+ GET /admin/dashboard 200 in 192ms
+ ○ Compiling /api/code/execute ...
+ ✓ Compiled /api/code/execute in 705ms (3012 modules)
+[execution-log] saved system for execution ba3dc890-4ba7-4fb4-a7ee-b2400f9b8cca
+[code-execution] execution service rejected request (HTTP 530) for cpp: <!doctype html>
+<!--[if lt IE 7]> <html class="no-js ie6 oldie" lang="en-US"> <![endif]-->
+<!--[if IE 7]>    <html class="no-js ie7 oldie" lang="en-US"> <![endif]-->
+<!--[if IE 8]>    <html class="no-js ie8 oldie" lang="en-US"> <![endif]-->
+<!--[if gt IE 8]><!-->
+<html class="no-js" lang="en-US">
+    <!--<![endif]-->
+    <head>
+        <title>Cloudflare Tunnel error | hash-bryan-medieval-organization.trycloudflare.com | Cloudflare</title>
+        <meta charset="UTF-8" />
+<meta http-equiv="Conten
+[code-execution] unexpected error: Error: The code execution service reported a problem (HTTP 530). Please try again later.
+    at HttpBackend.execute (src\lib\code-execution\backends\http-backend.ts:274:23)
+    at async POST (src\app\api\code\execute\route.ts:247:24)
+  272 |                     );
+  273 |                 }
+> 274 |                 throw new Error(
+      |                       ^
+  275 |                     `The code execution service reported a problem (HTTP ${response.status}). Please try again later.`,
+  276 |                 );
+  277 |             }
+[execution-log] saved system for execution ba3dc890-4ba7-4fb4-a7ee-b2400f9b8cca
+ POST /api/code/execute 500 in 4362ms
+ ○ Compiling /api/ai/explain-error ...
+ ✓ Compiled /api/ai/explain-error in 1535ms (3174 modules)
+ POST /api/ai/explain-error 200 in 4564ms
+   Reload env: .env.local
+ ✓ Compiled in 434ms (2798 modules)
+ GET /code 200 in 122ms
+ GET /code 200 in 367ms
+ ✓ Compiled /favicon.ico in 271ms (1095 modules)
+ GET /favicon.ico 200 in 315ms
+ ✓ Compiled /api/code/execute in 125ms (1114 modules)
+[execution-log] saved system for execution 002b5e97-463a-44d8-9a4b-dd3fb3f2e21d
+[execution-log] saved stdout for execution 002b5e97-463a-44d8-9a4b-dd3fb3f2e21d
+[execution-log] saved system for execution 002b5e97-463a-44d8-9a4b-dd3fb3f2e21d
+[CONVEX M(leaderboard:recordCodeExecution)] [LOG] '[leaderboard] recordCodeExecution user=kd75zya8v6gff24eqnr6j0tm798dtrzk executionId=002b5e97-463a-44d8-9a4b-dd3fb3f2e21d status=success pointsAwarded=10 xpAwarded=10'
+[code-execution] XP awarded: 10, total XP: 110
+ POST /api/code/execute 200 in 4692ms
+[execution-log] saved system for execution e949b96e-7ca3-4c0a-854c-fbe5b858df56
+[execution-log] saved stdout for execution e949b96e-7ca3-4c0a-854c-fbe5b858df56
+[execution-log] saved system for execution e949b96e-7ca3-4c0a-854c-fbe5b858df56
+[CONVEX M(leaderboard:recordCodeExecution)] [LOG] '[leaderboard] recordCodeExecution user=kd75zya8v6gff24eqnr6j0tm798dtrzk executionId=e949b96e-7ca3-4c0a-854c-fbe5b858df56 status=success pointsAwarded=10 xpAwarded=10'
+[code-execution] XP awarded: 10, total XP: 130
+ POST /api/code/execute 200 in 4178ms
+[execution-log] saved system for execution 031d6e63-2c6b-4f6d-aa43-9c69763b4852
+[execution-log] saved stdout for execution 031d6e63-2c6b-4f6d-aa43-9c69763b4852
+[execution-log] saved system for execution 031d6e63-2c6b-4f6d-aa43-9c69763b4852
+[CONVEX M(leaderboard:recordCodeExecution)] [LOG] '[leaderboard] recordCodeExecution user=kd75zya8v6gff24eqnr6j0tm798dtrzk executionId=031d6e63-2c6b-4f6d-aa43-9c69763b4852 status=success pointsAwarded=10 xpAwarded=10'
+[code-execution] XP awarded: 10, total XP: 150
+ POST /api/code/execute 200 in 4863ms
+ ✓ Compiled /dashboard in 391ms (1112 modules)
+ GET /dashboard 200 in 648ms
+ ○ Compiling /admin/dashboard ...
+ ✓ Compiled /admin/dashboard in 1285ms (1645 modules)
+ GET /admin/dashboard 200 in 1465ms
+ GET /admin/dashboard 200 in 32ms
+ ○ Compiling /challenges ...
+ ✓ Compiled /challenges in 1755ms (3033 modules)
+ GET /challenges 200 in 1973ms
+ ✓ Compiled in 1595ms (2484 modules)
+ ✓ Compiled /challenges in 151ms (1130 modules)
+ GET /challenges 200 in 391ms
+ ✓ Compiled in 981ms (2502 modules)
+ GET /challenges 200 in 118ms
+ ✓ Compiled in 1138ms (2502 modules)
+ GET /challenges 200 in 75ms
+ ✓ Compiled in 943ms (2502 modules)
+ GET /challenges 200 in 104ms
+ ✓ Compiled in 2.1s (2502 modules)
+ GET /challenges 200 in 203ms
+ GET /code 200 in 205ms
+ ○ Compiling /api/code/execute ...
+ ✓ Compiled /api/code/execute in 2.5s (1152 modules)
+[execution-log] saved system for execution 040e7dca-df50-46e9-b04e-a8928b3bcbb5
+[execution-log] saved stdout for execution 040e7dca-df50-46e9-b04e-a8928b3bcbb5
+ ✓ Compiled in 1750ms (2524 modules)
+[execution-log] saved system for execution 040e7dca-df50-46e9-b04e-a8928b3bcbb5
+[CONVEX M(leaderboard:recordCodeExecution)] [LOG] '[leaderboard] recordCodeExecution user=kd75zya8v6gff24eqnr6j0tm798dtrzk executionId=040e7dca-df50-46e9-b04e-a8928b3bcbb5 status=success pointsAwarded=10 xpAwarded=10'
+[code-execution] XP awarded: 10, total XP: 160
+ POST /api/code/execute 200 in 10874ms
+ GET /code 200 in 632ms
+[execution-log] saved system for execution 01520d99-a28f-46c8-bf67-b6b595ef3409
+[execution-log] saved stdout for execution 01520d99-a28f-46c8-bf67-b6b595ef3409
+[execution-log] saved system for execution 01520d99-a28f-46c8-bf67-b6b595ef3409
+[CONVEX M(leaderboard:recordCodeExecution)] [LOG] '[leaderboard] recordCodeExecution user=kd75zya8v6gff24eqnr6j0tm798dtrzk executionId=01520d99-a28f-46c8-bf67-b6b595ef3409 status=success pointsAwarded=10 xpAwarded=10'
+[code-execution] XP awarded: 10, total XP: 170
+ POST /api/code/execute 200 in 4541ms
+ ✓ Compiled in 1191ms (2524 modules)
+ GET /code 200 in 153ms
+ ⨯ ./src/app/code/page.tsx
+Error:   [31mx[0m Unexpected eof
+      ,-[[36;1;4mE:\coding platform\coderush\src\app\code\page.tsx[0m:2257:4]
+ [2m2255[0m |         </div>
+ [2m2256[0m |     );
+ [2m2257[0m | }
+      `----
+
+Caused by:
+    Syntax Error
+
+Import trace for requested module:
+./src/app/code/page.tsx
+ ○ Compiling /_error ...
+ ⨯ ./src/app/code/page.tsx
+Error:   [31mx[0m Unexpected eof
+      ,-[[36;1;4mE:\coding platform\coderush\src\app\code\page.tsx[0m:2257:4]
+ [2m2255[0m |         </div>
+ [2m2256[0m |     );
+ [2m2257[0m | }
+      `----
+
+Caused by:
+    Syntax Error
+
+Import trace for requested module:
+./src/app/code/page.tsx
+ GET /code 500 in 2463ms
+ GET /code 500 in 45ms
+ GET /code 500 in 43ms
+ GET /code 500 in 50ms
+ ⚠ Fast Refresh had to perform a full reload. Read more: https://nextjs.org/docs/messages/fast-refresh-reload
+ ⚠ Fast Refresh had to perform a full reload. Read more: https://nextjs.org/docs/messages/fast-refresh-reload
+ ⨯ ./src/app/code/page.tsx
+Error:   [31mx[0m Unexpected eof
+      ,-[[36;1;4mE:\coding platform\coderush\src\app\code\page.tsx[0m:2382:4]
+ [2m2380[0m |         </div>
+ [2m2381[0m |     );
+ [2m2382[0m | }
+      `----
+
+Caused by:
+    Syntax Error
+
+Import trace for requested module:
+./src/app/code/page.tsx
+ GET /code 500 in 42ms
+ ⚠ Fast Refresh had to perform a full reload. Read more: https://nextjs.org/docs/messages/fast-refresh-reload
+ ⨯ ./src/app/code/page.tsx
+Error:   [31mx[0m Unexpected eof
+      ,-[[36;1;4mE:\coding platform\coderush\src\app\code\page.tsx[0m:2382:4]
+ [2m2380[0m |         </div>
+ [2m2381[0m |     );
+ [2m2382[0m | }
+      `----
+
+Caused by:
+    Syntax Error
+
+Import trace for requested module:
+./src/app/code/page.tsx
+ ⚠ Fast Refresh had to perform a full reload. Read more: https://nextjs.org/docs/messages/fast-refresh-reload
+ ⚠ Fast Refresh had to perform a full reload. Read more: https://nextjs.org/docs/messages/fast-refresh-reload
+ ⚠ Fast Refresh had to perform a full reload. Read more: https://nextjs.org/docs/messages/fast-refresh-reload
+ ⚠ Fast Refresh had to perform a full reload. Read more: https://nextjs.org/docs/messages/fast-refresh-reload
+ ⨯ ./src/app/code/page.tsx
+Error:   [31mx[0m Unexpected eof
+      ,-[[36;1;4mE:\coding platform\coderush\src\app\code\page.tsx[0m:2382:4]
+ [2m2380[0m |         </div>
+ [2m2381[0m |     );
+ [2m2382[0m | }
+      `----
+
+Caused by:
+    Syntax Error
+
+Import trace for requested module:
+./src/app/code/page.tsx
+ GET /code 500 in 1993ms
+ ⚠ Fast Refresh had to perform a full reload. Read more: https://nextjs.org/docs/messages/fast-refresh-reload
+ ⚠ Fast Refresh had to perform a full reload. Read more: https://nextjs.org/docs/messages/fast-refresh-reload
+ ⨯ ./src/app/code/page.tsx
+Error:   [31mx[0m Unexpected eof
+      ,-[[36;1;4mE:\coding platform\coderush\src\app\code\page.tsx[0m:2482:4]
+ [2m2480[0m |         </div>
+ [2m2481[0m |     );
+ [2m2482[0m | }
+      `----
+
+Caused by:
+    Syntax Error
+
+Import trace for requested module:
+./src/app/code/page.tsx
+ GET /code 500 in 43ms
+ ⚠ Fast Refresh had to perform a full reload. Read more: https://nextjs.org/docs/messages/fast-refresh-reload
+ ⚠ Fast Refresh had to perform a full reload. Read more: https://nextjs.org/docs/messages/fast-refresh-reload
+ ⨯ ./src/app/code/page.tsx
+Error:   [31mx[0m Unexpected eof
+      ,-[[36;1;4mE:\coding platform\coderush\src\app\code\page.tsx[0m:2577:4]
+ [2m2575[0m |         </div>
+ [2m2576[0m |     );
+ [2m2577[0m | }
+      `----
+
+Caused by:
+    Syntax Error
+
+Import trace for requested module:
+./src/app/code/page.tsx
+ GET /code 500 in 49ms
+ ⚠ Fast Refresh had to perform a full reload. Read more: https://nextjs.org/docs/messages/fast-refresh-reload
+ ⚠ Fast Refresh had to perform a full reload. Read more: https://nextjs.org/docs/messages/fast-refresh-reload
+ ⚠ Fast Refresh had to perform a full reload. Read more: https://nextjs.org/docs/messages/fast-refresh-reload
+ ✓ Compiled /_not-found in 3.7s (2851 modules)
+ GET /code 200 in 415ms
+ ✓ Compiled in 1268ms (2851 modules)
+ GET /code 200 in 232ms
+ ✓ Compiled in 1423ms (2755 modules)
+ GET /code 200 in 290ms
+ ○ Compiling /api/code/interactive/start ...
+ ✓ Compiled /api/code/interactive/start in 3.5s (2775 modules)
+ POST /api/code/interactive/start 201 in 2567ms
+ POST /api/code/interactive/start 201 in 5604ms
+ GET /code 200 in 2932ms
+ ○ Compiling /api/code/interactive/stream ...
+ ✓ Compiled /api/code/interactive/stream in 3.8s (2763 modules)
+ ○ Compiling /api/code/interactive/input ...
+ ✓ Compiled /api/code/interactive/input in 1591ms (2765 modules)
+ POST /api/code/interactive/input?sessionId=92d4976f-7789-47a6-baaf-130035d61573 200 in 1832ms
+ POST /api/code/interactive/input?sessionId=92d4976f-7789-47a6-baaf-130035d61573 200 in 104ms
+ ○ Compiling /api/code/interactive/heartbeat ...
+ ✓ Compiled /api/code/interactive/heartbeat in 1060ms (2767 modules)
+ POST /api/code/interactive/heartbeat?sessionId=7e2d879e-410a-478b-8996-a25e406d48d9 200 in 1156ms
+ POST /api/code/interactive/heartbeat?sessionId=7e2d879e-410a-478b-8996-a25e406d48d9 200 in 117ms
+ POST /api/code/interactive/heartbeat?sessionId=7e2d879e-410a-478b-8996-a25e406d48d9 200 in 79ms
+ POST /api/code/interactive/heartbeat?sessionId=7e2d879e-410a-478b-8996-a25e406d48d9 200 in 81ms
+ POST /api/code/interactive/heartbeat?sessionId=7e2d879e-410a-478b-8996-a25e406d48d9 200 in 57ms
+ POST /api/code/interactive/heartbeat?sessionId=7e2d879e-410a-478b-8996-a25e406d48d9 200 in 70ms
+ POST /api/code/interactive/heartbeat?sessionId=7e2d879e-410a-478b-8996-a25e406d48d9 200 in 87ms
+ POST /api/code/interactive/heartbeat?sessionId=7e2d879e-410a-478b-8996-a25e406d48d9 200 in 72ms
