@@ -10,7 +10,9 @@
  *
  * Configuration (server-side only — never exposed to the browser):
  *   EXECUTION_SERVICE_URL      base URL of a self-hosted Piston-compatible
- *                              instance, e.g. http://localhost:2000/api/v2/piston
+ *                              instance, e.g. http://localhost:2000/api/v2
+ *                              (the backend appends /runtimes and /execute
+ *                              itself; do NOT include /piston or /execute)
  *   EXECUTION_SERVICE_API_KEY  optional bearer token for private instances
  *
  * Behaviour notes:
@@ -79,8 +81,9 @@ export class HttpBackend implements ExecutionBackend {
 
     /**
      * Accept URLs with or without a trailing "/execute" so both
-     *   EXECUTION_SERVICE_URL=http://host:2000/api/v2/piston
-     * and .../piston/execute work identically.
+     *   EXECUTION_SERVICE_URL=https://host/api/v2
+     * and https://host/api/v2/execute work identically. The final
+     * execution endpoint is always <serviceRoot>/execute.
      */
     private get serviceRoot(): string {
         return this.baseUrl.replace(/\/+$/, "").replace(/\/execute$/, "");

@@ -40,6 +40,15 @@ export interface TerminalProps {
 
     /** Called after a line is successfully sent for local terminal echo. */
     onInput?: (line: string) => void;
+
+    /**
+     * Called for lines typed while NO program is running. With the
+     * single-shot execution flow (HTTP / Piston backend) stdin cannot be
+     * streamed to a live process, so the parent collects these lines as
+     * stdin for the next Run Code. When provided, the terminal input is
+     * enabled even while idle.
+     */
+    onIdleInput?: (line: string) => void;
 }
 
 export interface TerminalSegment {
@@ -52,6 +61,7 @@ export default function Terminal({
     output,
     onClear,
     onInput,
+    onIdleInput,
 }: TerminalProps) {
     const terminalRef = useRef<HTMLDivElement | null>(null);
     const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -60,6 +70,9 @@ export default function Terminal({
     const [value, setValue] = useState("");
     const [inputError, setInputError] = useState<string | null>(null);
     const [sending, setSending] = useState(false);
+
+    /** Stdin entry is allowed while idle when the parent buffers it. */
+    const canTypeWhenIdle = Boolean(onIdleInput);
 
     // Clear terminal input when a run finishes. Uses the "adjust state
     // during render" pattern (React docs) instead of an effect.
@@ -77,21 +90,35 @@ export default function Terminal({
      * Focus terminal input.
      */
     const focusTerminal = useCallback(() => {
-        if (!run) return;
+        if (!run && !canTypeWhenIdle) return;
 
         requestAnimationFrame(() => {
             inputRef.current?.focus();
         });
-    }, [run]);
+    }, [run, canTypeWhenIdle]);
 
     /**
-     * Submit one line to the running process.
+     * Submit one line to the running process — or, while no program is
+     * running, hand it to the parent as stdin for the next Run Code.
      */
     const handleSubmit = useCallback(
         async (e: FormEvent<HTMLFormElement>) => {
             e.preventDefault();
 
-            if (!run || sending) {
+            if (sending) {
+                return;
+            }
+
+            if (!run) {
+                if (!onIdleInput) return;
+
+                const text = value;
+
+                setValue("");
+                setInputError(null);
+
+                onIdleInput(text);
+
                 return;
             }
 
@@ -126,7 +153,7 @@ export default function Terminal({
                 focusTerminal();
             }
         },
-        [run, value, sending, onInput, focusTerminal],
+        [run, value, sending, onInput, onIdleInput, focusTerminal],
     );
 
     /**
@@ -187,7 +214,7 @@ export default function Terminal({
      */
     const handleTerminalClick = useCallback(
         (e: MouseEvent<HTMLDivElement>) => {
-            if (!run) return;
+            if (!run && !canTypeWhenIdle) return;
 
             const target = e.target as HTMLElement;
 
@@ -201,7 +228,7 @@ export default function Terminal({
 
             focusTerminal();
         },
-        [run, focusTerminal],
+        [run, canTypeWhenIdle, focusTerminal],
     );
 
     /**
@@ -369,7 +396,9 @@ export default function Terminal({
                         <p className="whitespace-pre-wrap text-neutral-600">
                             {run
                                 ? "Program started. Click here and type your input."
-                                : "Run your code to see live output here."}
+                                : canTypeWhenIdle
+                                    ? "Type your program input below (Enter after each line), then press Run Code."
+                                    : "Run your code to see live output here."}
                         </p>
                     ) : (
                         output.map((seg, i) => {
@@ -433,13 +462,15 @@ export default function Terminal({
                         onClick={(e) => {
                             e.stopPropagation();
                         }}
-                        disabled={!isRunning || sending}
+                        disabled={(!isRunning && !canTypeWhenIdle) || sending}
                         placeholder={
                             isRunning
                                 ? sending
                                     ? "Sending input..."
                                     : "Type input here and press Enter..."
-                                : "Run Code to start the program."
+                                : canTypeWhenIdle
+                                    ? "Type program input for the next Run Code (Enter to add)..."
+                                    : "Run Code to start the program."
                         }
                         spellCheck={false}
                         autoComplete="off"
@@ -455,7 +486,7 @@ export default function Terminal({
                         ].join(" ")}
                     />
 
-                    {isRunning && !sending && (
+                    {(isRunning || canTypeWhenIdle) && !sending && (
                         <span className="select-none text-[10px] text-neutral-600">
                             Enter ↵
                         </span>

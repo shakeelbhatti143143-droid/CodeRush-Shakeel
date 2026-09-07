@@ -39,10 +39,7 @@ import BookmarkButton from "@/components/bookmarks/BookmarkButton";
 import { ToastStack, type ToastItem, useToasts } from "@/components/ui/Toast";
 
 import { getLanguage } from "@/lib/code-execution/languages";
-import {
-    InteractiveRun,
-    startInteractiveRun,
-} from "@/lib/code-execution/interactive-client";
+import type { InteractiveRun } from "@/lib/code-execution/interactive-client";
 
 import type { LanguageId } from "@/lib/code-execution/types";
 import {
@@ -67,25 +64,35 @@ function storageKey(language: LanguageId): string {
     return `coderush-code-${language}`;
 }
 
-function exitReasonLabel(reason: string): string {
-    switch (reason) {
-        case "stopped":
-            return "Program stopped.";
-        case "timeout":
-            return "Program reached the time limit and was terminated.";
-        case "idle_timeout":
-            return "Program was idle too long and was terminated.";
-        default:
-            return "Program finished.";
-    }
-}
-
 function languageName(language: LanguageId): string {
     try {
         return getLanguage(language).label;
     } catch {
         return language;
     }
+}
+
+/**
+ * Response shape of POST /api/code/execute (see
+ * src/app/api/code/execute/route.ts). Also carries `{ error }` on
+ * non-2xx responses.
+ */
+interface ExecuteResponse {
+    success: boolean;
+    status:
+        | "success"
+        | "compilation_error"
+        | "runtime_error"
+        | "timeout"
+        | "internal_error";
+    stdout: string;
+    stderr: string;
+    compile_output: string;
+    message: string | null;
+    output: string;
+    error?: string | null;
+    executionTime: number;
+    memoryUsageKb: number | null;
 }
 
 export default function CodePage() {
@@ -148,8 +155,20 @@ export default function CodePage() {
     const runFnRef =
         useRef<() => void>(() => { });
 
-    const recordedSessionsRef =
-        useRef<Set<string>>(new Set());
+    /**
+     * Stdin collected from the terminal input before running. With the
+     * single-shot execution flow (HTTP / Piston backend) a program's
+     * stdin cannot be streamed live, so every line typed into the
+     * terminal before pressing Run Code is buffered here and submitted
+     * with the execution request. The interactive (local Docker)
+     * backend still streams lines live and does not consume this.
+     */
+    const stdinBufferRef = useRef("");
+
+    /** True while a single-shot /api/code/execute request is in flight. */
+    const [executing, setExecuting] = useState(false);
+    const executingRef = useRef(false);
+    const abortRef = useRef<AbortController | null>(null);
 
     const logSequenceRef =
         useRef(0);
@@ -384,7 +403,7 @@ export default function CodePage() {
         [],
     );
 
-    const running = run !== null;
+    const running = run !== null || executing;
 
     /* ------------------------------------------------------------
        Save Execution Logs
@@ -433,78 +452,12 @@ export default function CodePage() {
         [convex],
     );
 
-    /* ------------------------------------------------------------
-       Leaderboard Submission
-    ------------------------------------------------------------ */
-
-    const recordSubmission = useCallback(
-        async (
-            status:
-                | "success"
-                | "runtime_error"
-                | "timeout",
-            sessionLanguage: LanguageId,
-            startedAtMs: number,
-            exitCode: number | null,
-            sessionId?: string,
-            errorMessage?: string,
-        ) => {
-            if (sessionId) {
-                if (
-                    recordedSessionsRef.current.has(
-                        sessionId,
-                    )
-                ) {
-                    return;
-                }
-
-                recordedSessionsRef.current.add(
-                    sessionId,
-                );
-            }
-
-            try {
-                if (sessionId) {
-                    const result =
-                        await convex.mutation(
-                            api.leaderboard.recordCodeExecution,
-                            {
-                                executionId: sessionId,
-                                status,
-                                executionTime:
-                                    Math.max(
-                                        0,
-                                        Date.now() -
-                                        startedAtMs,
-                                    ),
-                                exitCode:
-                                    exitCode ??
-                                    undefined,
-                                errorMessage:
-                                    errorMessage ??
-                                    undefined,
-                            },
-                        );
-
-                    if (
-                        (result.xpAwarded ?? 0) >
-                        0
-                    ) {
-                        push(
-                            `+${result.xpAwarded} XP for a successful run!`,
-                            "success",
-                        );
-                    }
-                }
-            } catch (err) {
-                console.error(
-                    "Failed to record execution:",
-                    err,
-                );
-            }
-        },
-        [convex, push],
-    );
+    /**
+     * NOTE: leaderboard/XP recording for the normal Run Code flow happens
+     * SERVER-SIDE inside POST /api/code/execute (it calls
+     * api.leaderboard.recordCodeExecution with the client-supplied
+     * executionId), so no client-side recordSubmission is needed here.
+     */
 
     /* ------------------------------------------------------------
        Stop
@@ -519,6 +472,13 @@ export default function CodePage() {
 
         if (current) {
             void current.stop();
+        }
+
+        // Single-shot execution in flight — abort the HTTP request.
+        // The in-flight handleRun() detects the abort, records the run
+        // as "stopped" and resets the executing state.
+        if (executingRef.current) {
+            abortRef.current?.abort();
         }
     }, []);
 
@@ -723,6 +683,7 @@ export default function CodePage() {
         async () => {
             if (
                 runRef.current ||
+                executingRef.current ||
                 code.trim().length === 0
             ) {
                 return;
@@ -746,23 +707,41 @@ export default function CodePage() {
             const startedAtMs =
                 Date.now();
 
+            /**
+             * Client-side correlation id. /api/code/execute uses it to
+             * attach the Convex execution record, execution logs and XP
+             * award to this run (mirrors the old interactive sessionId).
+             */
+            const executionId =
+                typeof crypto !== "undefined" &&
+                typeof crypto.randomUUID === "function"
+                    ? crypto.randomUUID()
+                    : `exec-${startedAtMs}-${Math.random()
+                        .toString(36)
+                        .slice(2)}`;
+
+            /**
+             * Stdin typed into the terminal before running. Lines typed
+             * DURING the run are buffered for the next run — a single-shot
+             * request cannot receive stdin after it has been submitted.
+             */
+            const stdinSnapshot =
+                stdinBufferRef.current;
+
             let stdoutCollector = "";
 
             let stderrCollector = "";
 
+            executingRef.current = true;
+
+            setExecuting(true);
+
+            const controller =
+                new AbortController();
+
+            abortRef.current = controller;
+
             try {
-                const interactive =
-                    await startInteractiveRun(
-                        sessionLanguage,
-                        sessionCode,
-                    );
-
-                const executionId =
-                    interactive.sessionId;
-
-                logSequenceRef.current =
-                    0;
-
                 await convex.mutation(
                     api.executions.createExecution,
                     {
@@ -772,253 +751,238 @@ export default function CodePage() {
                     },
                 );
 
-                await saveExecutionLog(
-                    executionId,
-                    "system",
-                    "Program started.",
-                );
-
-                runRef.current =
-                    interactive;
-
-                setRun(interactive);
-
-                await interactive.stream(
-                    (event) => {
-                        if (
-                            event.kind ===
-                            "stdout"
-                        ) {
-                            stdoutCollector +=
-                                event.text;
-
-                            appendOutput([
-                                {
-                                    kind: "stdout",
-                                    text: event.text,
-                                },
-                            ]);
-
-                            void saveExecutionLog(
-                                executionId,
-                                "stdout",
-                                event.text,
-                            );
-                        } else if (
-                            event.kind ===
-                            "stderr"
-                        ) {
-                            stderrCollector +=
-                                event.text;
-
-                            appendOutput([
-                                {
-                                    kind: "stderr",
-                                    text: event.text,
-                                },
-                            ]);
-
-                            void saveExecutionLog(
-                                executionId,
-                                "stderr",
-                                event.text,
-                            );
-                        } else if (
-                            event.kind ===
-                            "exit"
-                        ) {
-                            runRef.current =
-                                null;
-
-                            setRun(null);
-
-                            appendOutput([
-                                {
-                                    kind: "meta",
-                                    text: `\n[${exitReasonLabel(
-                                        event.reason,
-                                    )}]\n`,
-                                },
-                            ]);
-
-                            const status =
-                                event.reason ===
-                                    "timeout" ||
-                                    event.reason ===
-                                    "idle_timeout"
-                                    ? "timeout"
-                                    : event.reason ===
-                                        "stopped"
-                                        ? "stopped"
-                                        : (
-                                            event.exitCode ??
-                                            1
-                                        ) === 0
-                                            ? "success"
-                                            : "runtime_error";
-
-                            void convex.mutation(
-                                api.executions.updateExecution,
-                                {
-                                    executionId,
-                                    status,
-                                    completedAt:
-                                        Date.now(),
-                                    exitCode:
-                                        event.exitCode ??
-                                        undefined,
-                                    executionTime:
-                                        Math.max(
-                                            0,
-                                            Date.now() -
-                                            startedAtMs,
-                                        ),
-                                },
-                            );
-
-                            void saveExecutionLog(
-                                executionId,
-                                "system",
-                                `Program finished: ${status}`,
-                            );
-
-                            if (
-                                event.reason !==
-                                "stopped"
-                            ) {
-                                void recordSubmission(
-                                    status ===
-                                        "success"
-                                        ? "success"
-                                        : status ===
-                                            "timeout"
-                                            ? "timeout"
-                                            : "runtime_error",
-                                    sessionLanguage,
-                                    startedAtMs,
-                                    event.exitCode,
-                                    interactive.sessionId,
-                                );
-                            }
-
-                            if (
-                                event.exitCode !==
-                                0 ||
-                                stderrCollector.length >
-                                0
-                            ) {
-                                const parsed =
-                                    parseError({
+                /**
+                 * Normal Run Code flow: single-shot execution through
+                 * /api/code/execute -> executeCode() -> HttpBackend ->
+                 * self-hosted Piston (EXECUTION_SERVICE_URL, i.e.
+                 * .../api/v2/execute). The interactive session APIs remain
+                 * available for local Docker runs but are intentionally
+                 * NOT used on this path.
+                 */
+                const response =
+                    await fetch(
+                        "/api/code/execute",
+                        {
+                            method: "POST",
+                            headers: {
+                                "Content-Type":
+                                    "application/json",
+                            },
+                            body:
+                                JSON.stringify(
+                                    {
                                         language:
                                             sessionLanguage,
-                                        stderr:
-                                            stderrCollector ||
-                                            null,
-                                        stdout:
-                                            stdoutCollector,
-                                        exitCode:
-                                            event.exitCode,
-                                    });
+                                        code: sessionCode,
+                                        stdin:
+                                            stdinSnapshot,
+                                        executionId,
+                                    },
+                                ),
+                            signal:
+                                controller.signal,
+                        },
+                    );
 
-                                if (parsed) {
-                                    setParsedError(
-                                        parsed,
-                                    );
+                const data =
+                    (await response
+                        .json()
+                        .catch(
+                            () => null,
+                        )) as
+                        | ExecuteResponse
+                        | null;
 
-                                    setActiveTab(
-                                        "error",
-                                    );
+                if (
+                    !response.ok ||
+                    !data
+                ) {
+                    const message =
+                        data &&
+                        typeof data.error ===
+                            "string"
+                            ? data.error
+                            : `Execution failed (HTTP ${response.status}).`;
 
-                                    push(
-                                        `Error detected: ${parsed.title}`,
-                                        "error",
-                                    );
-                                }
-                            } else {
-                                setParsedError(
-                                    null,
-                                );
+                    throw new Error(
+                        message,
+                    );
+                }
 
-                                push(
-                                    "✓ Program completed successfully",
-                                    "success",
-                                );
-                            }
-                        } else if (
-                            event.kind ===
-                            "error"
-                        ) {
-                            runRef.current =
-                                null;
+                const stdoutText =
+                    data.stdout ??
+                    data.output ??
+                    "";
 
-                            setRun(null);
+                const stderrText =
+                    data.stderr ?? "";
 
-                            appendOutput([
-                                {
-                                    kind: "stderr",
-                                    text: `\n[${event.message}]\n`,
-                                },
-                            ]);
+                const compileText =
+                    data.compile_output ??
+                    "";
 
-                            void convex.mutation(
-                                api.executions.updateExecution,
-                                {
-                                    executionId,
-                                    status:
-                                        "internal_error",
-                                    completedAt:
-                                        Date.now(),
-                                    errorMessage:
-                                        event.message,
-                                    executionTime:
-                                        Math.max(
-                                            0,
-                                            Date.now() -
-                                            startedAtMs,
-                                        ),
-                                },
-                            );
+                const executionTimeMs =
+                    typeof data.executionTime ===
+                    "number"
+                        ? data.executionTime
+                        : Math.max(
+                            0,
+                            Date.now() -
+                                startedAtMs,
+                        );
 
-                            void saveExecutionLog(
-                                executionId,
-                                "stderr",
-                                event.message,
-                            );
+                if (stdoutText) {
+                    stdoutCollector +=
+                        stdoutText;
 
-                            const parsed =
-                                parseError({
-                                    language:
-                                        sessionLanguage,
-                                    stderr:
-                                        event.message,
-                                    stdout:
-                                        stdoutCollector,
-                                    exitCode: 1,
-                                }) ||
-                                makeInternalError(
-                                    event.message,
-                                );
+                    appendOutput([
+                        {
+                            kind: "stdout",
+                            text: stdoutText,
+                        },
+                    ]);
+                }
 
-                            setParsedError(
-                                parsed,
-                            );
+                if (stderrText) {
+                    stderrCollector +=
+                        stderrText;
 
-                            setActiveTab(
-                                "error",
-                            );
+                    appendOutput([
+                        {
+                            kind: "stderr",
+                            text: stderrText,
+                        },
+                    ]);
+                }
 
-                            push(
-                                `Execution failed: ${event.message}`,
-                                "error",
-                            );
-                        }
+                if (compileText) {
+                    stderrCollector +=
+                        compileText;
+
+                    appendOutput([
+                        {
+                            kind: "stderr",
+                            text: compileText,
+                        },
+                    ]);
+                }
+
+                const status =
+                    data.status;
+
+                const success =
+                    status === "success";
+
+                const metaLabel =
+                    status === "success"
+                        ? "Program finished."
+                        : status ===
+                            "compilation_error"
+                            ? "Compilation failed."
+                            : status === "timeout"
+                                ? "Program reached the time limit and was terminated."
+                                : "Program finished with an error.";
+
+                appendOutput([
+                    {
+                        kind: "meta",
+                        text: `\n[${metaLabel}]\n`,
                     },
-                );
+                ]);
+
+                void convex
+                    .mutation(
+                        api.executions.updateExecution,
+                        {
+                            executionId,
+                            status,
+                            completedAt:
+                                Date.now(),
+                            exitCode: success
+                                ? 0
+                                : 1,
+                            executionTime:
+                                executionTimeMs,
+                            errorMessage:
+                                success
+                                    ? undefined
+                                    : data.message ??
+                                        data.error ??
+                                        undefined,
+                        },
+                    )
+                    .catch(() => { });
+
+                if (success) {
+                    setParsedError(null);
+
+                    push(
+                        "✓ Program completed successfully",
+                        "success",
+                    );
+                } else {
+                    const parsed =
+                        parseError({
+                            language:
+                                sessionLanguage,
+                            stderr:
+                                stderrCollector ||
+                                null,
+                            stdout:
+                                stdoutCollector,
+                            exitCode: 1,
+                        }) ||
+                        makeInternalError(
+                            data.message ??
+                                data.error ??
+                                metaLabel,
+                        );
+
+                    setParsedError(parsed);
+
+                    setActiveTab("error");
+
+                    push(
+                        `Error detected: ${parsed.title}`,
+                        "error",
+                    );
+                }
             } catch (err) {
-                runRef.current =
-                    null;
+                runRef.current = null;
 
                 setRun(null);
+
+                // User pressed Stop while the request was in flight.
+                if (
+                    controller.signal.aborted
+                ) {
+                    appendOutput([
+                        {
+                            kind: "meta",
+                            text: "\n[Program stopped.]\n",
+                        },
+                    ]);
+
+                    void convex
+                        .mutation(
+                            api.executions.updateExecution,
+                            {
+                                executionId,
+                                status: "stopped",
+                                completedAt:
+                                    Date.now(),
+                                executionTime:
+                                    Math.max(
+                                        0,
+                                        Date.now() -
+                                            startedAtMs,
+                                    ),
+                            },
+                        )
+                        .catch(() => { });
+
+                    return;
+                }
 
                 const msg =
                     err instanceof Error
@@ -1028,23 +992,46 @@ export default function CodePage() {
                 appendOutput([
                     {
                         kind: "stderr",
-                        text: `\n[Failed to start: ${msg}]\n`,
+                        text: `\n[Failed to execute: ${msg}]\n`,
                     },
                 ]);
 
+                void convex
+                    .mutation(
+                        api.executions.updateExecution,
+                        {
+                            executionId,
+                            status: "internal_error",
+                            completedAt:
+                                Date.now(),
+                            errorMessage: msg,
+                            executionTime:
+                                Math.max(
+                                    0,
+                                    Date.now() -
+                                        startedAtMs,
+                                ),
+                        },
+                    )
+                    .catch(() => { });
+
                 const parsed =
-                    makeInternalError(
-                        msg,
-                    );
+                    makeInternalError(msg);
 
                 setParsedError(parsed);
 
                 setActiveTab("error");
 
                 push(
-                    "Could not start execution sandbox.",
+                    "Could not execute code.",
                     "error",
                 );
+            } finally {
+                executingRef.current = false;
+
+                setExecuting(false);
+
+                abortRef.current = null;
             }
         },
         [
@@ -1052,8 +1039,6 @@ export default function CodePage() {
             language,
             convex,
             appendOutput,
-            recordSubmission,
-            saveExecutionLog,
             push,
         ],
     );
@@ -1182,23 +1167,38 @@ export default function CodePage() {
     const handleInputSent =
         useCallback(
             (line: string) => {
-                appendOutput([
-                    {
-                        kind: "stdout",
-                        text:
-                            line + "\n",
-                    },
-                ]);
-
                 const current =
                     runRef.current;
 
                 if (current) {
+                    // Live interactive session (local Docker backend):
+                    // stream the line straight into the program's stdin.
+                    appendOutput([
+                        {
+                            kind: "stdout",
+                            text:
+                                line + "\n",
+                        },
+                    ]);
+
                     void saveExecutionLog(
                         current.sessionId,
                         "stdin",
                         line,
                     );
+                } else {
+                    // Single-shot execution (HTTP / Piston backend):
+                    // buffer the line as stdin for the next Run Code.
+                    stdinBufferRef.current +=
+                        line + "\n";
+
+                    appendOutput([
+                        {
+                            kind: "meta",
+                            text:
+                                line + "\n",
+                        },
+                    ]);
                 }
             },
             [
@@ -2034,6 +2034,9 @@ export default function CodePage() {
                                             )
                                         }
                                         onInput={
+                                            handleInputSent
+                                        }
+                                        onIdleInput={
                                             handleInputSent
                                         }
                                     />
